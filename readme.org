@@ -1,0 +1,364 @@
+#+title: DOTO
+
+* Introduction
+
+This is another dot interface for common lisp
+using exclusively the common lisp formatter as a
+means of turning s-expressions into valid dot code.
+
+This library is written following the paper
+cite:UsingTheNewCCW1992 where the author uses
+the formatter in order to transpile a minimal subset of
+common lisp into pascal as a proof of principle.
+
+In passing, it is written as a literate program.
+
+
+* Implementation
+:PROPERTIES:
+:header-args:lisp+: :results none :comments noweb :package doto
+:END:
+
+** Packages and asdf                                               :noexport:
+
+#+begin_src lisp :tangle package.lisp
+;;;; package.lisp
+;;
+;;;; Copyright (c) 2022 Alejandro Gallo
+
+
+(defpackage #:doto
+  (:use #:cl)
+  (:export
+   #:write-dot
+   #:with-dot
+   #:with-dot-to-string
+   #:with-dot-to-x11))
+#+end_src
+
+#+begin_src lisp :tangle doto.asd
+;;;; doto.asd
+;;
+;;;; Copyright (c) 2022 Alejandro Gallo
+
+
+(asdf:defsystem #:doto
+  :description "Describe doto here"
+  :author "Alejandro Gallo"
+  :license  "GPLv3"
+  :version "0.0.1"
+  :serial t
+  :depends-on (#:uiop)
+  :components ((:file "package")
+               (:file "doto")))
+#+end_src
+
+
+#+begin_src lisp :tangle doto.lisp :exports none 
+;;;; doto.lisp
+;;
+;;;; Copyright (c) 2022 Alejandro Gallo
+(in-package #:doto)
+#+end_src
+
+** Introduction
+
+The main idea of this library is to write a single s-expression that involves all information
+in an explicit manner. However, some extra amenabilities can be defined, like interpreting
+function calls if the lisp image recognises the function call to be valid.
+
+** The expander
+
+The main writing will be done using the pretty print dispatcher. Therefore
+we have to define a copy of the common lisp dispatcher
+
+#+begin_src lisp :tangle doto.lisp 
+(defvar *PD* (copy-pprint-dispatch))
+#+end_src
+
+In order to create a simple s-expression that can be later stored
+and inspected we first write an expander
+
+#+begin_src lisp :tangle doto.lisp 
+(defun car-is-fboundp (x)
+  (and (consp x)
+       (symbolp (car x))
+       (fboundp (car x))))
+
+(defun expand (list)
+  (etypecase list
+    ((satisfies car-is-fboundp) (expand (eval list)))
+    ((cons (member :let))
+     (destructuring-bind (_ bindings &rest body) list
+       (declare (ignore _))
+       (expand (sublis (mapcar (lambda (bs) (cons (car bs)
+                                                  (cadr bs)))
+                               bindings)
+                       body
+                       :test #'equal))))
+    (cons (mapcar #'expand list))
+    (t list)))
+#+end_src
+
+** Writer API
+
+#+begin_src lisp :tangle doto.lisp 
+(defun write-dot (sexpr &rest args)
+  (apply #'write (expand sexpr) :pretty t
+                                :pprint-dispatch *PD*
+                                args))
+
+(defmacro with-dot (sexpr)
+  `(write-dot ',sexpr))
+
+(defmacro with-dot-to-string (sexpr)
+  (let ((stream (gensym)))
+    `(with-output-to-string (,stream)
+       (write-dot ',sexpr :stream ,stream))))
+
+(defmacro with-dot-to-x11 (sexpr)
+  (let ((out (gensym "output"))
+        (in (gensym "input")))
+    `(with-input-from-string (,in (with-output-to-string (,out)
+                                    (write-dot ',sexpr :stream ,out)))
+       (uiop:run-program '("dot" "-Tx11")
+                         :input ,in))))
+#+end_src
+
+** Element writers
+
+*** Atoms
+#+begin_src lisp :tangle doto.lisp 
+(set-pprint-dispatch 'keyword
+                     (lambda (s sbl)
+                       (write-string
+                        (remove #\- (string-downcase sbl))
+                        s))
+                     1 *PD*)
+
+(set-pprint-dispatch 'symbol
+                     (lambda (s sbl)
+                       (write-string
+                        (remove #\- (string-capitalize sbl))
+                        s))
+                     0 *PD*)
+#+end_src
+
+*** Scope
+
+#+begin_src lisp :tangle doto.lisp 
+(defun pr-scope (s list)
+  (format s "~<~*~1@{{~2i~_~
+             ~@{~W~^~_~}~
+             ~I~_}~}~:>"
+          list))
+
+(set-pprint-dispatch '(cons (member :scope))
+                     #'pr-scope
+                     0 *PD*)
+
+(set-pprint-dispatch '(cons (member :graph))
+                     (lambda (s list)
+                       (let* ((type (string-downcase (string (car list))))
+                              (name (when (atom #1=(cadr list))
+                                      #1#))
+                              (body (if name
+                                        (cddr list)
+                                        (cdr list))))
+                         (format s "~a " type)
+                         (when name
+                           (format s "~W " name))
+                         (pr-scope s (list :scope body))))
+                     0 *PD*)
+
+(set-pprint-dispatch '(cons (member :list))
+                     (formatter "~<~*~@{~w~^,~}~:>")
+                     0 *PD*)
+
+
+(set-pprint-dispatch '(cons (member :=))
+                     (formatter "~{~*~W = ~W;~}")
+                     0 *PD*)
+
+(set-pprint-dispatch 'cons
+                     (formatter "~<~@{~w~^ ~_~}~:>")
+                     -1 *PD*)
+#+end_src
+
+*** Options
+
+#+begin_src lisp :tangle doto.lisp 
+(defun pr-options (s list &rest ignore)
+  (declare (ignore ignore))
+  (format s "~<[~
+             ~1i~@{~W=~W~^, ~_~}~
+             ]~:>"
+          list))
+
+(set-pprint-dispatch '(cons (member :node-opts :edge-opts :graph-opts))
+                     (lambda (s list)
+                       (format s "~(~a~) "
+                               (subseq (string (car list))
+                                       0
+                                       (position #\- (string (car list)))))
+                       (pr-options s (cdr list))
+                       (write-string ";" s))
+                     0 *PD*)
+#+end_src
+
+*** Nodes and edges
+
+#+begin_src lisp :tangle doto.lisp 
+(set-pprint-dispatch '(cons (member :node))
+                     (lambda (s list)
+                       (format s "~w " (cadr list))
+                       (pr-options s (cddr list))
+                       (write-string ";" s))
+                     0 *PD*)
+
+(set-pprint-dispatch '(cons (member :cluster))
+                     (lambda (s list)
+                       (format s "subgraph cluster_~W ~W"
+                               (cadr list)
+                               (list :scope (cddr list))))
+                     0 *PD*)
+
+(set-pprint-dispatch '(cons (member :-- :-> :<-))
+                     (lambda (s list)
+                       (destructuring-bind (type from to &rest opts) list
+                         (case type
+                           (:-> (setq opts (append '(:dir "forward") opts)))
+                           (:<- (setq opts (append '(:dir "back") opts))))
+                         (format s "~<~
+                                    ~w~_ --~_ ~w ~
+                                    ~/doto::pr-options/;~
+                                    ~:>"
+                                 (list (list :scope from) (list :scope to) opts))))
+                     0 *PD*)
+#+end_src
+
+* Examples
+:PROPERTIES:
+:header-args:lisp+: :results none :comments noweb :package doto
+:END:
+
+#+begin_src lisp
+(progn
+  (write-string
+   (doto::with-dot-to-string
+       (:let ((main-color :blue))
+         (:graph
+          (:node :a :color :red :shape "Mrecord")
+          (:node :b :color :blue)
+          (:-- :a :b)
+          (:-> :a :b)
+          (:<- :a :b)
+          (:-- #1=(:scope
+                   :a :b :c :d)
+               #1#
+               :color :red)
+          (:cluster whatever-section
+                    (:node lolo)
+                    (:node lkjlkj)
+                    (:node lala :color :red))
+          ))))
+  (terpri))
+
+
+
+
+(flet ((my-shape () :square))
+  (with-dot-to-x11
+      (:let ((main-color :red))
+        (:graph
+         (:node :a :color main-color :fontcolor main-color :shape (my-shape))))))
+
+(with-dot-to-x11
+    (:graph D
+            (:node A :shape :diamond)
+            (:node B :shape :box)
+            (:node C :shape :circle)
+
+            (:-> A B :style :dashed :color :grey)
+            (:-> A C :color "black:invis:black")
+            (:-> A D :penwidth 5 :arrowhead :none)))
+
+
+(with-dot-to-x11
+    (:let ((:bcd (:list B C D)))
+      (:graph D
+              (:-> A :bcd)
+              (:-> :bcd F))))
+
+(terpri)
+(with-dot
+;; (with-dot-to-x11
+    (:graph L
+            (:node-opts :shape :record :fontname Arial)
+
+            (:node a :label "one\\ltwo three\\lfour five six seven\\l")))
+
+
+(with-dot-to-x11
+;; (terpri)
+;; (with-dot
+    (:graph R
+            (:node-opts :shape :record)
+
+            (:scope (:graph-opts :rank :same)
+                    (:list ra sa ta))
+            (:scope (:graph-opts :rank :same)
+                    (:list ub vb wb))
+
+            (:-> ra sa)
+            (:-> sa vb)
+            (:-> t ra)
+            (:-> ub vb)
+            (:-> wb u)
+            (:-> wb ta)))
+
+
+
+;; (with-dot;;-to-x11
+(with-dot-to-x11
+    (:graph Q
+            (:node-opts :shape :record)
+
+            (:node nd-1 :label "Node 1")
+            (:node nd-2 :label "Node 2")
+            (:node nd-3-a :label "Above Right Node 3")
+            (:node nd-3-l :label "Left of Node 3")
+            (:node nd-3 :label "Node 3")
+            (:node nd-3-r :label "Right of Node 3")
+            (:node nd-4 :label "Node 4")
+
+            (:-> nd-3-a nd-3-r)
+            (:-> nd-1 nd-2)
+            (:-> nd-2 nd-3)
+            (:-> nd-3 nd-4)
+
+            (:cluster R
+                      (:graph-opts :rank :same
+                                   :label "Third floor"
+                                   :fontcolor :red)
+                      (nd-3-l nd-3 nd-3-r))))
+
+
+
+(with-dot-to-x11
+    (:graph D
+            (:cluster p
+                      (:= :label "Parent")
+                      (:cluster c1
+                                (:= :label "Child one")
+                                a
+                                (:cluster gc-1
+                                          (:= :label "Grand child one")
+                                          b)
+                                (:cluster gc-2
+                                          (:= :label "Grand child two")
+                                          c d))
+                      (:cluster c2
+                                (:= :label "Child two")
+                                e))))
+#+end_src
