@@ -1,9 +1,15 @@
-;; [[file:readme.org::*Implementation][Implementation:1]]
+;; [[file:readme.org::*Packages and asdf][Packages and asdf:1]]
 ;;;; package.lisp
 ;;
 ;;;; Copyright (c) 2022 Alejandro Gallo
 
 
 (defpackage #:doto
-  (:use #:cl))
-;; Implementation:1 ends here
+  (:use #:cl)
+  (:export
+   #:write-dot
+   #:with-dot
+   #:with-dot-to-string
+   #:with-dot-to-svg
+   #:with-dot-to-x11))
+;; Packages and asdf:1 ends here

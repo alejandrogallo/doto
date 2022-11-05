@@ -1,11 +1,11 @@
-;; [[file:readme.org::*Implementation][Implementation:2]]
+;; [[file:readme.org::*Packages and asdf][Packages and asdf:2]]
 ;;;; doto.asd
 ;;
 ;;;; Copyright (c) 2022 Alejandro Gallo
 
 
 (asdf:defsystem #:doto
-  :description "Describe doto here"
+  :description "Doto is a slim library to convert s-expressions into lisp"
   :author "Alejandro Gallo"
   :license  "GPLv3"
   :version "0.0.1"
@@ -13,4 +13,13 @@
   :depends-on (#:uiop)
   :components ((:file "package")
                (:file "doto")))
-;; Implementation:2 ends here
+
+(asdf:defsystem #:doto/test
+  :description "Tests"
+  :author "Alejandro Gallo"
+  :license  "GPLv3"
+  :version "0.0.1"
+  :serial t
+  :depends-on (#:doto #:fiveam)
+  :components ((:file "t")))
+;; Packages and asdf:2 ends here

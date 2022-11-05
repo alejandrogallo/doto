@@ -1,15 +1,15 @@
-;; [[file:readme.org::*Implementation][Implementation:3]]
+;; [[file:readme.org::*Packages and asdf][Packages and asdf:3]]
 ;;;; doto.lisp
 ;;
 ;;;; Copyright (c) 2022 Alejandro Gallo
 (in-package #:doto)
-;; Implementation:3 ends here
+;; Packages and asdf:3 ends here
 
-;; [[file:readme.org::*Implementation][Implementation:4]]
+;; [[file:readme.org::*The expander][The expander:1]]
 (defvar *PD* (copy-pprint-dispatch))
-;; Implementation:4 ends here
+;; The expander:1 ends here
 
-;; [[file:readme.org::*Implementation][Implementation:5]]
+;; [[file:readme.org::*The expander][The expander:2]]
 (defun car-is-fboundp (x)
   (and (consp x)
        (symbolp (car x))
@@ -17,7 +17,9 @@
 
 (defun expand (list)
   (etypecase list
-    ((satisfies car-is-fboundp) (expand (eval list)))
+    ((or (satisfies car-is-fboundp)
+         (cons (member :listp)))
+     (expand (eval list)))
     ((cons (member :let))
      (destructuring-bind (_ bindings &rest body) list
        (declare (ignore _))
@@ -28,9 +30,9 @@
                        :test #'equal))))
     (cons (mapcar #'expand list))
     (t list)))
-;; Implementation:5 ends here
+;; The expander:2 ends here
 
-;; [[file:readme.org::*Implementation][Implementation:6]]
+;; [[file:readme.org::*Writer API][Writer API:1]]
 (defun write-dot (sexpr &rest args)
   (apply #'write (expand sexpr) :pretty t
                                 :pprint-dispatch *PD*
@@ -52,7 +54,19 @@
        (uiop:run-program '("dot" "-Tx11")
                          :input ,in))))
 
+(defmacro with-dot-to-svg (sexpr)
+  (let ((dot-out (gensym "output"))
+        (svg-out (gensym "svg"))
+        (in (gensym "input")))
+    `(with-input-from-string (,in (with-output-to-string (,dot-out)
+                                    (write-dot ',sexpr :stream ,dot-out)))
+       (with-output-to-string (,svg-out)
+           (uiop:run-program '("dot" "-Tsvg")
+                             :input ,in
+                             :output ,svg-out)))))
+;; Writer API:1 ends here
 
+;; [[file:readme.org::*Atoms][Atoms:1]]
 (set-pprint-dispatch 'keyword
                      (lambda (s sbl)
                        (write-string
@@ -66,8 +80,9 @@
                         (remove #\- (string-capitalize sbl))
                         s))
                      0 *PD*)
+;; Atoms:1 ends here
 
-
+;; [[file:readme.org::*Scope][Scope:1]]
 (defun pr-scope (s list)
   (format s "~<~*~1@{{~2i~_~
              ~@{~W~^~_~}~
@@ -104,7 +119,9 @@
 (set-pprint-dispatch 'cons
                      (formatter "~<~@{~w~^ ~_~}~:>")
                      -1 *PD*)
+;; Scope:1 ends here
 
+;; [[file:readme.org::*Options][Options:1]]
 (defun pr-options (s list &rest ignore)
   (declare (ignore ignore))
   (format s "~<[~
@@ -121,7 +138,9 @@
                        (pr-options s (cdr list))
                        (write-string ";" s))
                      0 *PD*)
+;; Options:1 ends here
 
+;; [[file:readme.org::*Nodes and edges][Nodes and edges:1]]
 (set-pprint-dispatch '(cons (member :node))
                      (lambda (s list)
                        (format s "~w " (cadr list))
@@ -148,4 +167,4 @@
                                     ~:>"
                                  (list (list :scope from) (list :scope to) opts))))
                      0 *PD*)
-;; Implementation:6 ends here
+;; Nodes and edges:1 ends here
