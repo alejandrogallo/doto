@@ -360,18 +360,7 @@ and inspected we first write an expander
               (:-> A :bcd)
               (:-> :bcd F))))
 
-(terpri)
-(with-dot
-;; (with-dot-to-x11
-    (:graph L
-            (:node-opts :shape :record :fontname Arial)
-
-            (:node a :label "one\\ltwo three\\lfour five six seven\\l")))
-
-
 (with-dot-to-x11
-;; (terpri)
-;; (with-dot
     (:graph R
             (:node-opts :shape :record)
 
@@ -389,7 +378,6 @@ and inspected we first write an expander
 
 
 
-;; (with-dot;;-to-x11
 (with-dot-to-x11
     (:graph Q
             (:node-opts :shape :record)
